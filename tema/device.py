@@ -76,8 +76,6 @@ class Device(object):
         if script is not None:
             self.scripts.append((script, location))
             self.script_received.set()
-        else:
-            self.timepoint_done.set()
 
     def get_data(self, location):
         """
