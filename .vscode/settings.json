@@ -1,3 +1,5 @@
 {
-    "python.pythonPath": "C:\\Python27\\python.exe"
+    "python.pythonPath": "C:\\Python27\\python.exe",
+    "git.ignoreLimitWarning": true,
+    "python.formatting.provider": "black"
 }
