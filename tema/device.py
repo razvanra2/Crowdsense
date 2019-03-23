@@ -6,7 +6,7 @@ Assignment 1
 March 2019
 """
 
-from threading import Event, Thread
+from threading import Event, Thread, Lock
 from reusable_barrier import ReusableBarrier
 
 class Device(object):
@@ -29,6 +29,8 @@ class Device(object):
         """
         self.devices = None
         self.timestampBarrier = None
+        self.setupBarrier = None
+        self.dataLock = Lock()
 
         self.device_id = device_id
         self.sensor_data = sensor_data
@@ -58,9 +60,11 @@ class Device(object):
         
         if self.device_id == 0:
             self.timestampBarrier = ReusableBarrier(len(devices))
+            self.setupBarrier = ReusableBarrier(len(devices))
             for otherDevice in self.devices:
                 if otherDevice.device_id != 0:
                     otherDevice.timestampBarrier = self.timestampBarrier
+                    otherDevice.setupBarrier = self.setupBarrier
 
     def assign_script(self, script, location):
         """
@@ -73,9 +77,10 @@ class Device(object):
         @type location: Integer
         @param location: the location for which the script is interested in
         """
-        if script is not None:
-            self.scripts.append((script, location))
+        if script is None:
             self.script_received.set()
+        else:
+            self.scripts.append((script, location))
 
     def get_data(self, location):
         """
@@ -87,7 +92,8 @@ class Device(object):
         @rtype: Float
         @return: the pollution value
         """
-        return self.sensor_data[location] if location in self.sensor_data else None
+        with self.dataLock:
+            return self.sensor_data[location] if location in self.sensor_data else None
 
     def set_data(self, location, data):
         """
@@ -99,8 +105,9 @@ class Device(object):
         @type data: Float
         @param data: the pollution value
         """
-        if location in self.sensor_data:
-            self.sensor_data[location] = data
+        with self.dataLock:
+            if location in self.sensor_data:
+                self.sensor_data[location] = data
 
     def shutdown(self):
         """
@@ -127,7 +134,7 @@ class DeviceThread(Thread):
         self.device = device
 
     def run(self):
-        # hope there is only one timepoint, as multiple iterations of the loop are not supported
+        self.device.setupBarrier.wait()
         while True:
             # get the current neighbourhood
             neighbours = self.device.supervisor.get_neighbours()
@@ -159,4 +166,4 @@ class DeviceThread(Thread):
                     # update our data, hope no one is updating at the same time
                     self.device.set_data(location, result)
                 # wait for all devices to finish same timestamp execution
-                self.device.timestampBarrier.wait()
+            self.device.timestampBarrier.wait()
