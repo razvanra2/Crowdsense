@@ -7,7 +7,7 @@ March 2019
 """
 
 from threading import Event, Thread
-
+from barrier import ReusableBarrierSem
 
 class Device(object):
     """
@@ -27,12 +27,14 @@ class Device(object):
         @type supervisor: Supervisor
         @param supervisor: the testing infrastructure's control and validation component
         """
+        self.devices = None
+        self.timestampBarrier = None
+
         self.device_id = device_id
         self.sensor_data = sensor_data
         self.supervisor = supervisor
         self.script_received = Event()
         self.scripts = []
-        self.timepoint_done = Event()
         self.thread = DeviceThread(self)
         self.thread.start()
 
@@ -52,8 +54,13 @@ class Device(object):
         @type devices: List of Device
         @param devices: list containing all devices
         """
-        # we don't need no stinkin' setup
-        pass
+        self.devices = devices
+        
+        if self.device_id == 0:
+            self.timestampBarrier = ReusableBarrierSem(len(devices))
+            for otherDevice in self.devices:
+                if otherDevice.device_id != 0:
+                    otherDevice.timestampBarrier = self.timestampBarrier
 
     def assign_script(self, script, location):
         """
@@ -153,6 +160,5 @@ class DeviceThread(Thread):
                         device.set_data(location, result)
                     # update our data, hope no one is updating at the same time
                     self.device.set_data(location, result)
-
-            # hope we don't get more than one script
-            self.device.timepoint_done.wait()
+                # wait for all devices to finish same timestamp execution
+                self.device.timestampBarrier.wait()
