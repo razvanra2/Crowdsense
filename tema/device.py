@@ -7,7 +7,7 @@ March 2019
 """
 
 from threading import Event, Thread
-from barrier import ReusableBarrierSem
+from reusable_barrier import ReusableBarrier
 
 class Device(object):
     """
@@ -57,7 +57,7 @@ class Device(object):
         self.devices = devices
         
         if self.device_id == 0:
-            self.timestampBarrier = ReusableBarrierSem(len(devices))
+            self.timestampBarrier = ReusableBarrier(len(devices))
             for otherDevice in self.devices:
                 if otherDevice.device_id != 0:
                     otherDevice.timestampBarrier = self.timestampBarrier
