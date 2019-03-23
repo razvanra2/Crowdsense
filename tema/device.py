@@ -29,7 +29,7 @@ class Device(object):
         """
         self.devices = None
         self.timestampBarrier = None
-        self.setupBarrier = None
+        self.setupComplete = Event()
         self.dataLock = Lock()
 
         self.device_id = device_id
@@ -60,12 +60,10 @@ class Device(object):
         
         if self.device_id == 0:
             self.timestampBarrier = ReusableBarrier(len(devices))
-            self.setupBarrier = ReusableBarrier(len(devices))
             for otherDevice in self.devices:
                 if otherDevice.device_id != 0:
                     otherDevice.timestampBarrier = self.timestampBarrier
-                    otherDevice.setupBarrier = self.setupBarrier
-
+        self.setupComplete.set()
     def assign_script(self, script, location):
         """
         Provide a script for the device to execute.
@@ -134,7 +132,8 @@ class DeviceThread(Thread):
         self.device = device
 
     def run(self):
-        self.device.setupBarrier.wait()
+        self.device.setupComplete.wait()
+        self.device.setupComplete.clear()
         while True:
             # get the current neighbourhood
             neighbours = self.device.supervisor.get_neighbours()
@@ -142,28 +141,22 @@ class DeviceThread(Thread):
                 break
 
             self.device.script_received.wait()
+            self.device.script_received.clear()
 
-            # run scripts received until now
-            for (script, location) in self.device.scripts:
-                script_data = []
-                # collect data from current neighbours
-                for device in neighbours:
-                    data = device.get_data(location)
-                    if data is not None:
-                        script_data.append(data)
-                # add our data, if any
-                data = self.device.get_data(location)
-                if data is not None:
-                    script_data.append(data)
+            currIterThreads = [None] * 8
 
-                if script_data != []:
-                    # run script on data
-                    result = script.run(script_data)
+            while len(self.device.scripts) > 0:
+                threadsToAppend = min(len(self.device.scripts), 8)
+                for i in range(threadsToAppend):
+                    currIterThreads.append(RunnerThread(self.device.scripts.pop(), 
+                    neighbours))
+                for i in range(threadsToAppend):
+                    if currIterThreads[i] is not None:
+                        currIterThreads[i].start()
+                for i in range(threadsToAppend):
+                    if currIterThreads[i] is not None:
+                        currIterThreads[i].join()
 
-                    # update data of neighbours, hope no one is updating at the same time
-                    for device in neighbours:
-                        device.set_data(location, result)
-                    # update our data, hope no one is updating at the same time
-                    self.device.set_data(location, result)
                 # wait for all devices to finish same timestamp execution
+            self.device.script_received.clear()
             self.device.timestampBarrier.wait()
