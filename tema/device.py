@@ -8,7 +8,7 @@ March 2019
 
 from threading import Event, Thread, Lock
 from reusable_barrier import ReusableBarrier
-
+from runner_thread import RunnerThread
 class Device(object):
     """
     Class that represents a device.
@@ -30,8 +30,8 @@ class Device(object):
         self.devices = None
         self.timestampBarrier = None
         self.setupComplete = Event()
-        self.dataLock = Lock()
-
+        self.locationLocks = dict()
+        
         self.device_id = device_id
         self.sensor_data = sensor_data
         self.supervisor = supervisor
@@ -57,13 +57,15 @@ class Device(object):
         @param devices: list containing all devices
         """
         self.devices = devices
-        
         if self.device_id == 0:
             self.timestampBarrier = ReusableBarrier(len(devices))
-            for otherDevice in self.devices:
-                if otherDevice.device_id != 0:
-                    otherDevice.timestampBarrier = self.timestampBarrier
-        self.setupComplete.set()
+            for device in self.devices:
+                for _ in device.sensor_data:
+                    self.locationLocks[_] = Lock()
+            for device in devices:
+                device.timestampBarrier = self.timestampBarrier
+                device.locationLocks = self.locationLocks
+                device.setupComplete.set()
     def assign_script(self, script, location):
         """
         Provide a script for the device to execute.
@@ -90,8 +92,7 @@ class Device(object):
         @rtype: Float
         @return: the pollution value
         """
-        with self.dataLock:
-            return self.sensor_data[location] if location in self.sensor_data else None
+        return self.sensor_data[location] if location in self.sensor_data else None
 
     def set_data(self, location, data):
         """
@@ -103,9 +104,8 @@ class Device(object):
         @type data: Float
         @param data: the pollution value
         """
-        with self.dataLock:
-            if location in self.sensor_data:
-                self.sensor_data[location] = data
+        if location in self.sensor_data:
+            self.sensor_data[location] = data
 
     def shutdown(self):
         """
@@ -114,7 +114,6 @@ class Device(object):
         started by this device terminate.
         """
         self.thread.join()
-
 
 class DeviceThread(Thread):
     """
@@ -133,7 +132,6 @@ class DeviceThread(Thread):
 
     def run(self):
         self.device.setupComplete.wait()
-        self.device.setupComplete.clear()
         while True:
             # get the current neighbourhood
             neighbours = self.device.supervisor.get_neighbours()
@@ -142,21 +140,26 @@ class DeviceThread(Thread):
 
             self.device.script_received.wait()
             self.device.script_received.clear()
+            
+            scriptCnt = len(self.device.scripts)
+            start = 0
+            stop = min(start + 8, start + scriptCnt)
+            
+            threads = []
+            for i in range(0, scriptCnt):
+                    threads.append(RunnerThread(self.device, self.device.scripts[i], neighbours))
 
-            currIterThreads = [None] * 8
+            while scriptCnt > 0:
+                for thread in threads[start:stop]:
+                    thread.start()
+                for thread in threads[start:stop]:
+                    thread.join()
+                
+                start = start + min(8, scriptCnt)
+                stop = min(start + 8, start + scriptCnt)
+                if scriptCnt > 8:
+                    scriptCnt -= 8
+                else:
+                    break
 
-            while len(self.device.scripts) > 0:
-                threadsToAppend = min(len(self.device.scripts), 8)
-                for i in range(threadsToAppend):
-                    currIterThreads.append(RunnerThread(self.device.scripts.pop(), 
-                    neighbours))
-                for i in range(threadsToAppend):
-                    if currIterThreads[i] is not None:
-                        currIterThreads[i].start()
-                for i in range(threadsToAppend):
-                    if currIterThreads[i] is not None:
-                        currIterThreads[i].join()
-
-                # wait for all devices to finish same timestamp execution
-            self.device.script_received.clear()
             self.device.timestampBarrier.wait()
