@@ -27,11 +27,11 @@ class Device(object):
         @type supervisor: Supervisor
         @param supervisor: the testing infrastructure's control and validation component
         """
-        self.devices = None
-        self.timestampBarrier = None
-        self.setupComplete = Event()
-        self.locationLocks = dict()
-        
+        self.devices = None # list of all the devices
+        self.timestamp_barrier = None # barrier used to sync all devices in 1 timestamp
+        self.setup_complete = Event() # event used to sync all setups
+        self.location_locks = dict() # regional locks
+
         self.device_id = device_id
         self.sensor_data = sensor_data
         self.supervisor = supervisor
@@ -57,15 +57,16 @@ class Device(object):
         @param devices: list containing all devices
         """
         self.devices = devices
-        if self.device_id == 0:
-            self.timestampBarrier = ReusableBarrier(len(devices))
+        if self.device_id == 0: # use device 0 as master
+            # and init all other devices from it
+            self.timestamp_barrier = ReusableBarrier(len(devices))
             for device in self.devices:
                 for _ in device.sensor_data:
-                    self.locationLocks[_] = Lock()
+                    self.location_locks[_] = Lock()
             for device in devices:
-                device.timestampBarrier = self.timestampBarrier
-                device.locationLocks = self.locationLocks
-                device.setupComplete.set()
+                device.timestamp_barrier = self.timestamp_barrier
+                device.location_locks = self.location_locks
+                device.setup_complete.set()
     def assign_script(self, script, location):
         """
         Provide a script for the device to execute.
@@ -131,7 +132,8 @@ class DeviceThread(Thread):
         self.device = device
 
     def run(self):
-        self.device.setupComplete.wait()
+        # wait so that all devices complete the setup
+        self.device.setup_complete.wait()
         while True:
             # get the current neighbourhood
             neighbours = self.device.supervisor.get_neighbours()
@@ -140,26 +142,26 @@ class DeviceThread(Thread):
 
             self.device.script_received.wait()
             self.device.script_received.clear()
-            
-            scriptCnt = len(self.device.scripts)
-            start = 0
-            stop = min(start + 8, start + scriptCnt)
-            
-            threads = []
-            for i in range(0, scriptCnt):
-                    threads.append(RunnerThread(self.device, self.device.scripts[i], neighbours))
 
-            while scriptCnt > 0:
+            script_cnt = len(self.device.scripts)
+            start = 0
+            stop = min(start + 8, start + script_cnt)
+            # init all the threads at once
+            threads = []
+            for i in range(0, script_cnt):
+                threads.append(RunnerThread(self.device, self.device.scripts[i], neighbours))
+            # then run them all in heaps of 8
+            while script_cnt > 0:
                 for thread in threads[start:stop]:
                     thread.start()
                 for thread in threads[start:stop]:
                     thread.join()
-                
-                start = start + min(8, scriptCnt)
-                stop = min(start + 8, start + scriptCnt)
-                if scriptCnt > 8:
-                    scriptCnt -= 8
+
+                start = start + min(8, script_cnt)
+                stop = min(start + 8, start + script_cnt)
+                if script_cnt > 8:
+                    script_cnt -= 8
                 else:
                     break
-
-            self.device.timestampBarrier.wait()
+            # wait untill all devices completed one timestamp iteration
+            self.device.timestamp_barrier.wait()

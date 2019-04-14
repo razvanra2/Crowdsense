@@ -1,0 +1,37 @@
+Tema 1 - ASC
+Razvan Radoi
+331CA
+
+Generalitati si structura:
+	device.py - modificari aduse conform cerintelor temei
+	reusable_barrier.py - bariera din lab-ul 3 :)
+	runner_thread.py - un runner thread (worker) pentru device
+
+Detalii de implementare:
+
+	Sincronizare:
+
+	Pentru sincronizarea device-urilor am folosit:
+	- un Event care marcheaza cand toate device-urile si-au terminat setup-ul
+	- un dictionary de Locks folosite pentru fiecare location. Cand mai multe
+	devices sunt intr-un location, unul singur are acces asupra datelor.
+	- o bariera care se asigura ca toate device-urile executa cate un timestamp,
+	pe rand (practic, toate device-urile sunt in aceeasi iteratie a buclei while,
+	la un moment de timp)
+
+	8-Way-Threading:
+	
+	Imitand un thread pool, am construit atatea threads cate aveam nevoie, apoi
+	le rulez pe heaps de cate (maxim) 8.
+	Runner Threads fac exact ceea ce facea master thread-ul inainte pentru o iteratie,
+	cu mentiunea ca se face acquire pe lock mai intai (si release la final, evident).
+	
+
+Feedback:
+
+	Nu am inteles foarte bine decizia de a nu se folosi variabile statice.
+	Work-around-ul nu este foarte greu (sa "dai" dintr-un device master aceeasi
+	variabila tuturor celorlalte device-uri), insa nu pare genul de lucru
+	pe care chiar l-ai face cand scrii cod pe bani, nu pentru un ex. didactic.
+	Imaginati-va ca ar trebui un telefon sa trimita o variabila la toate celelalte din
+	lume atunci cand deschizi un webview de facebook.
